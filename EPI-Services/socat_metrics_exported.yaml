@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: socat
+  name: socat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: socat
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: socat
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "3000"
+    spec:
+      containers:
+        - image: jamilakassem/socks-chaining_iperf
+          name: socat
+          securityContext:
+            privileged: true
+          ports:
+            - containerPort: 12345
+          resources: 
+            limits:
+              cpu: 200m
+            requests:
+              cpu: 100m
+          command: ["/bin/sh"]
+          args: ["-c", "socat - TCP-LISTEN:12345,fork,reuseaddr"]
+        - image: bbsummer/go-metrics:1.0
+          name: socat-n-metrics
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              memory: '300Mi'
+      restartPolicy: Always
+status: {}
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: socat
+spec:
+  type: NodePort
+  selector:
+    app: socat
+  ports:
+    - port: 12345
+      nodePort: 30020
+      protocol: TCP

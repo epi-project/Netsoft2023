@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: encrypt
+  name: encrypt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: encrypt
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: encrypt
+    spec:
+      containers:
+        - env:
+            - name: CHACHA20_KEY
+              value: "12345678901234567890123456789012"
+          image: jamilakassem/socks-chaining_encrypt
+          name: decrypt
+          resources:
+            limits:
+              cpu: 200m
+            requests:
+              cpu: 100m
+      restartPolicy: Always
+status: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: encrypt
+spec:
+  type: NodePort
+  selector:
+    app: encrypt
+  ports:
+    - port: 1080
+      targetPort: 1080
+      nodePort: 30011
+      protocol: TCP
+
