@@ -21,7 +21,6 @@ In this repository we add scaling techniques to the EPI framework setup to demon
 ## Start the client script, refer to the epif-poc/socks-chaining repository 
 
 ```shell
-  $ docker-compose up -d
   $ pipenv install click socksx
   $ pipenv shell
   $ cd Scripts
