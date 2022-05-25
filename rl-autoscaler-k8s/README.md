@@ -1,5 +1,5 @@
 ## k8s RL autoscaler
-The gym\_k8s\_real folder contains custom gym environment that controls the k8s cluster and obtains states.
+The gym\_k8s\_real folder contains predefined gym environment that controls the k8s cluster,obtains states and calculates reward.
 
 The agents folder contains the Q-learing RL autoscaler. 
 
@@ -20,3 +20,12 @@ Run `!pip install -e ../gym_k8s_real ` in `agents/Q_agent.ipynb`
 ```
 
 agents/Q_agent.ipynb is the simple Q-learning implementation. 
+
+## Metrics
+#### cpu utilization, number of pods
+obtained from HPA for proxy pod
+
+#### latency(request time)
+obtained from lz-04 server, which sends multiple requests and uses the average handling time as latency
+
+

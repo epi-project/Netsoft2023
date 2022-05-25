@@ -45,4 +45,11 @@ In this repository we add scaling techniques to the EPI framework setup to demon
   $ cd Scripts 
   $ ./getResourcesCSV.sh --help 
   $ ./getResourcesCSV.sh -n default --no-headers -o <filename>.csv
-  ```
+```
+
+## Structure of three custom folders
+
+#### latency_collector folder: to collect latency
+#### rl-autoscaler-k8s folder: to interact with k8s cluster and train Q-learning agent
+#### workload_generation folder: to generate workloads
+

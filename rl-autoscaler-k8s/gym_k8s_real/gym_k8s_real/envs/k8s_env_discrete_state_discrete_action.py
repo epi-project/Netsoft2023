@@ -81,6 +81,15 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
             dt_dict : Dict
                 dictionary of formatted date and time.
         """
+        encoded_observation, now_observation = self._get_state()
+        if action == 0 and now_observation[1] <= 20:
+            return now_observation, 0, self.done, encoded_observation
+        if action == 2 and now_observation[1] >= 100:
+            return now_observation, 0, self.done, encoded_observation
+        if action == 1:
+            reward = self._get_reward(now_observation)
+            return now_observation, reward, self.done, encoded_observation
+        
         self._take_action(action)  # Create HPA
         wait_time = self.timestep_duration * 60
         time.sleep(wait_time)  # Wait timestep_duration minutes for the changes to take place
@@ -158,8 +167,9 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
          pod_cpu_threshold,
          current_replicas) = self._get_existing_app_hpa()
 
-        pod_throughput = self._query_prometheus(self.prometheus_throughput_metric_name)
-
+        # pod_throughput = self._query_prometheus(self.prometheus_throughput_metric_name)
+        pod_throughput = self._query_latency(self.prometheus_throughput_metric_name)
+        
         if math.isnan(pod_throughput):
             pod_throughput = self.sla_throughput
 
@@ -171,13 +181,13 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
         ]
 
         current_replicas_percent = 100 * current_replicas / self.MAX_PODS
-        pod_throughput_percent = pod_throughput / self.sla_throughput
+        pod_throughput_percent = 100 * pod_throughput / self.sla_throughput
 
         # Adjust the threshold to match the discrete value
         # ranges for {0, 1, 2, 3, 4}
         real_observation_percent = [
             pod_cpu_current_util,
-            pod_cpu_threshold / 20,
+            pod_cpu_threshold - 20,
             current_replicas_percent,
             pod_throughput_percent
         ]
@@ -261,8 +271,13 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
 
         d = 5.0  # this is a hyperparameter of the reward function
 
-        throughput_ratio = self.sla_throughput / (pod_throughput+1)
-        if pod_number == 1 and throughput_ratio <= 0.5:
+        #计算throughput的reward
+        # throughput_ratio = self.sla_throughput / (pod_throughput+1)
+
+        #用latency计算reward
+        throughput_ratio = pod_throughput / self.sla_throughput
+
+        if pod_number == 1 and throughput_ratio <= 1:
             return reward_max
         elif throughput_ratio > 5:
             return reward_min
@@ -271,11 +286,20 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
             + 10 * self.MAX_PODS / (self.MAX_PODS - 1)
         reward += pod_weight * pod_reward
 
+        #用throughput计算reward
+        # throughout_ref_value = 1
+        # if throughput_ratio < throughout_ref_value:
+        #     throughput_reward = 10 * pow(math.e, -0.3 * d * throughput_ratio)
+        # else:
+        #     throughput_reward = 10 * pow(math.e, -10 * d * throughput_ratio)
+        # reward += throughput_weight * throughput_reward
+
+        #用latency计算reward
         throughout_ref_value = 1
         if throughput_ratio < throughout_ref_value:
             throughput_reward = 10 * pow(math.e, -0.3 * d * throughput_ratio)
         else:
-            throughput_reward = 10 * pow(math.e, -10 * d * throughput_ratio)
+            throughput_reward = 10 * pow(math.e, -10 * d * (throughput_ratio - throughout_ref_value))
         reward += throughput_weight * throughput_reward
 
         return reward
@@ -292,29 +316,50 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
         namespace = 'default'
         pretty = 'true'
 
-        try:
-            item = v2.read_namespaced_horizontal_pod_autoscaler(
-                name, namespace, pretty=pretty
-            )
-            if item.metadata.name == self.app_name:
-                for metric in item.status.current_metrics:
-                    if metric.resource.name == 'cpu':
-                        pod_cpu_current_util = metric.resource.current.average_utilization
+        item = v2.read_namespaced_horizontal_pod_autoscaler(
+            name, namespace, pretty=pretty
+        )
+        if item.metadata.name == self.app_name:
+            for metric in item.status.current_metrics:
+                if metric.resource.name == 'cpu':
+                    pod_cpu_current_util = metric.resource.current.average_utilization
 
-                for condition in item.status.conditions:
-                    if condition.reason != 'DesiredWithinRange' and condition.status == 'False':
-                        hpa_error = 1
-                        return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
+            for condition in item.status.conditions:
+                if condition.reason != 'DesiredWithinRange' and condition.status == 'False':
+                    hpa_error = 1
+                    return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
 
-                metrics = item.spec.metrics
-                for metric in metrics:
-                    if metric.resource.name == 'cpu':
-                        pod_cpu_threshold = metric.resource.target.average_utilization
+            metrics = item.spec.metrics
+            for metric in metrics:
+                if metric.resource.name == 'cpu':
+                    pod_cpu_threshold = metric.resource.target.average_utilization
 
-                current_replicas = item.status.current_replicas
-                return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
-        except Exception:
+            current_replicas = item.status.current_replicas
             return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
+
+        # try:
+        #     item = v2.read_namespaced_horizontal_pod_autoscaler(
+        #         name, namespace, pretty=pretty
+        #     )
+        #     if item.metadata.name == self.app_name:
+        #         for metric in item.status.current_metrics:
+        #             if metric.resource.name == 'cpu':
+        #                 pod_cpu_current_util = metric.resource.current.average_utilization
+
+        #         for condition in item.status.conditions:
+        #             if condition.reason != 'DesiredWithinRange' and condition.status == 'False':
+        #                 hpa_error = 1
+        #                 return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
+
+        #         metrics = item.spec.metrics
+        #         for metric in metrics:
+        #             if metric.resource.name == 'cpu':
+        #                 pod_cpu_threshold = metric.resource.target.average_utilization
+
+        #         current_replicas = item.status.current_replicas
+        #         return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
+        # except Exception:
+        #     return [hpa_error, pod_cpu_current_util, pod_cpu_threshold, current_replicas]
 
     def _create_hpa(self, threshold):
         v2 = client.AutoscalingV2beta2Api()
@@ -351,6 +396,9 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
                     scale_target_ref=client.V2beta2CrossVersionObjectReference(
                         kind='Deployment', name=self.app_name, api_version='apps/v1'
                     ),
+                    behavior=client.V2beta2HorizontalPodAutoscalerBehavior(scale_down = client.V2beta2HPAScalingRules(
+                    stabilization_window_seconds=30, select_policy = 'Max', policies = [client.V2beta2HPAScalingPolicy(
+                    type = 'Pods', value = 5, period_seconds = 60)]))
                 ),
                 status=status
             )
@@ -358,7 +406,7 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
             # Create new HPA with updated thresholds
             try:
                 api_response = v2.create_namespaced_horizontal_pod_autoscaler(namespace='default', body=body, pretty=True)
-                print(api_response)
+                print('Created new namespaced_horizontal_pod_autoscaler without exception')
             except Exception:
                 print('Created new namespaced_horizontal_pod_autoscaler')
 
@@ -427,5 +475,16 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
         results = response.json()['data']['result']
         if len(results) > 0:
             return float(results[0]['value'][1])
+        else:
+            return float('NaN')
+
+    def _query_latency(self, query_name):
+        latency_endpoint = 'http://145.100.135.89:6088/' + query_name
+        response = requests.get(
+            latency_endpoint
+        )
+        results = response.json()
+        if results:
+            return results
         else:
             return float('NaN')
