@@ -9,9 +9,16 @@ The agents folder contains the Q-learing RL autoscaler.
   $ pip install -e gym_k8s_real
 ```
 
-Or 
+Or run this command in `agents/Q_agent.ipynb`:
 
-Run `!pip install -e ../gym_k8s_real ` in `agents/Q_agent.ipynb`
+```shell
+  $ !pip install -e ../gym_k8s_real
+```
+
+#### There are three environments in total:
+1. `k8s-env-discrete-state-discrete-action-v0`: base discrete environment; 
+2. `k8s-env-discrete-state-discrete-action-v1`: discrete environment with changed discrete states definition
+3. `k8s-env-discrete-state-five-action-v0`: base discrete environment with five actions
 
 ## Run agents
 
@@ -19,7 +26,10 @@ Run `!pip install -e ../gym_k8s_real ` in `agents/Q_agent.ipynb`
   $ jupyter notebook
 ```
 
-agents/Q_agent.ipynb is the simple Q-learning implementation. 
+#### There are three agents in total:
+1. `Q_agent.ipynb`: the simple Q-learning agent for base environment. 
+2. `Q_agent_five_actions.ipynb`: the simple Q-learning agent for base environment. 
+3. `Q_agent_discrete_states_V1.ipynb`: the simple Q-learning agent for base environment. 
 
 ## Metrics
 #### cpu utilization, number of pods

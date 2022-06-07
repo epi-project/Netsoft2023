@@ -84,11 +84,11 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
         encoded_observation, now_observation = self._get_state()
         if action == 0 and now_observation[1] <= 20:
             return now_observation, 0, self.done, encoded_observation
-        if action == 2 and now_observation[1] >= 100:
+        if action == 2 and now_observation[1] >= 80:
             return now_observation, 0, self.done, encoded_observation
-        if action == 1:
-            reward = self._get_reward(now_observation)
-            return now_observation, reward, self.done, encoded_observation
+#         if action == 1:
+#             reward = self._get_reward(now_observation)
+#             return now_observation, reward, self.done, encoded_observation
         
         self._take_action(action)  # Create HPA
         wait_time = self.timestep_duration * 60
@@ -155,8 +155,8 @@ class K8sEnvDiscreteStateDiscreteAction(discrete.DiscreteEnv):
         if action == 0 and pod_cpu_threshold > 20:
             new_cpu_hpa_threshold -= 20
 
-        if action == 2 and pod_cpu_threshold < 100:
-            new_cpu_hpa_threshold += 20
+        if action == 2 and pod_cpu_threshold < 80:
+            new_cpu_hpa_threshold += 40
 
         self._create_hpa(new_cpu_hpa_threshold)
 
