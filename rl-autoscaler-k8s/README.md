@@ -28,8 +28,8 @@ Or run this command in `agents/Q_agent.ipynb`:
 
 #### There are three agents in total:
 1. `Q_agent.ipynb`: the simple Q-learning agent for base environment. 
-2. `Q_agent_five_actions.ipynb`: the simple Q-learning agent for base environment. 
-3. `Q_agent_discrete_states_V1.ipynb`: the simple Q-learning agent for base environment. 
+2. `Q_agent_five_actions.ipynb`: the simple Q-learning agent for environment with five actions. 
+3. `Q_agent_discrete_states_V1.ipynb`: the simple Q-learning agent for new discretized state spaces. 
 
 ## Metrics
 #### cpu utilization, number of pods
