@@ -12,7 +12,7 @@ def application(environ, start_response):
         return [str.encode(latency)]
 
 def getRequestTime():
-    roundCount = 3
+    roundCount = 2
     start = time.time()
     for _ in range(roundCount):
         os.system("python3 client.py")

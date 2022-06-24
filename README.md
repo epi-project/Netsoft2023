@@ -6,16 +6,10 @@ In this repository we add scaling techniques to the EPI framework setup to demon
   $ cd EPI-services
   $ kubectl apply -f decrypt.yaml #BF1 = The decryption server
   $ kubectl apply -f encrypt.yaml #BF2 = The encryption server
+  # cpu requests and limits in firewall.yaml are set with low numbers in experimental environments
   $ kubectl apply -f firewall.yaml #BF3 = The firewall server
   $ kubectl apply -f proxy.yaml #The SOCKS proxy
   $ kubectl apply -f socat.yaml #The end server
-```
-
-## Deploying socat pod with exported metrics; here we assume you deployed the prometheus server
-```shell
-  $ cd EPI-services
-  # deploy the end server with exported metrics 
-  $ kubectl apply -f socat_metrics_exported.yaml 
 ```
 
 ## Start the client script, refer to the epif-poc/socks-chaining repository 
@@ -29,16 +23,6 @@ In this repository we add scaling techniques to the EPI framework setup to demon
 
 ## In HPA and VPA path there's example deployment of scalers per service.
 
-### Use HPA with custom metrics
-
-```shell
-  # deploy the prometheus-adapter with predefined rules
-  $ cd Prometheus
-  $ helm install prometheus-adapter prometheus-community/prometheus-adapter -n default -f values-adapter.yaml 
-  # deploy hpa with custom metrics
-  $ cd ../HPA
-  $ kubectl apply -f socat-custom-HPA.yaml
-```
   
 ## To collect matrices, you need to successfully deploy the metric server, after you can run the collecting script
 ```shell
@@ -49,7 +33,15 @@ In this repository we add scaling techniques to the EPI framework setup to demon
 
 ## Structure of three custom folders
 
-#### latency_collector folder: to collect latency
-#### rl-autoscaler-k8s folder: to interact with k8s cluster and train Q-learning agent
-#### workload_generation folder: to generate workloads
+#### rl-autoscaler-k8s folder: 
+1. to interact with k8s cluster and train Q-learning agent;
+2. This folder should be run on the master node of k8s cluster;
+
+#### latency_collector folder:
+1. to collect latency;
+2. This folder can be run on any node to collect latency and expose to other nodes;
+
+#### workload_generation folder:
+1. to generate workloads;
+2. This folder can be run on any node to transmit requests;
 

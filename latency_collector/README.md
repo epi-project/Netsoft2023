@@ -4,9 +4,9 @@ The latency_collector folder contains code to calculate the average request time
 ## Start the collector server
  
 ```shell
-  $ cd Scripts
+  $ cd ../Scripts
   $ pipenv shell
-  $ cd latency_collector 
+  $ cd ../latency_collector 
   $ python3 collector.py
 ```
 

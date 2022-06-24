@@ -13,8 +13,8 @@ from socket import fromfd, AF_INET, SOCK_STREAM
 
 @command()
 @option('-d', '--debug', default=False, help="Prints debug information")
-@option('-d', '--destination', default="145.100.135.16:30020", help="Address of the destination")
-@option('-p', '--proxy', default='145.100.135.16:30007', help="Address of the proxy")
+@option('-d', '--destination', default="145.100.135.52:30020", help="Address of the destination")
+@option('-p', '--proxy', default='145.100.135.52:30007', help="Address of the proxy")
 @option('-s', '--socks', default=6, type=Choice([6]), help="SOCKS version")
 
 
@@ -74,26 +74,21 @@ async def main(loop, debug, destination, proxy, socks):
             # print("sent {} bytes".format(bytesAheadOfSchedule))
                 if (bytesAheadOfSchedule > 0):
                     time.sleep(ConvertBytesToSeconds(bytesAheadOfSchedule))
-        # else:
-          #  print("Error sending data, exiting!")
-           # break
+            else:
+                print("Error sending data, exiting!")
+                break
             idx -= 1
-            print(idx)
-    
-
+        
  #print py_socket.recvfrom(65565)
         print(py_socket)
     except Exception as e:
-        time.sleep(2)
-        print("error")
-
+        print('catched error')
 ###    py_socket.recv(40)
 #    iclient = iperf3.Client()
 #    iclient.run()
 
 if __name__ == "__main__":
      cli()
-     sys.out(1)
 
 #    threads = []
 #    input = input("Enter the number of clients you want to spawn:")

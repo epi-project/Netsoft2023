@@ -20,9 +20,9 @@ spec:
           name: firewall
           resources: 
             limits:
-              cpu: 200m
+              cpu: 20m
             requests:
-              cpu: 100m
+              cpu: 18m
       restartPolicy: Always
 status: {}
 
