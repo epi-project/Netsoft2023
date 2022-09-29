@@ -27,6 +27,8 @@ spec:
               cpu: 200m
             requests:
               cpu: 100m
+          command: ["/bin/sh"]
+          args: ["-c", "socat - TCP-LISTEN:12345,fork,reuseaddr"]
       restartPolicy: Always
 status: {}
 
