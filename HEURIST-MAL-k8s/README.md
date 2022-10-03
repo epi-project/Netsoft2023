@@ -1,7 +1,7 @@
-## k8s RL autoscaler
+## HEURIST-MAL-k8s
 The gym\_k8s\_real folder contains predefined gym environment that controls the k8s cluster,obtains states and calculates reward.
 
-The agents folder contains the Q-learing RL autoscaler. 
+The agents folder contains the Deep Q-learning RL autoscaler. 
 
 ## Install the gym environment
  
@@ -10,15 +10,11 @@ The agents folder contains the Q-learing RL autoscaler.
   $ pip install -e gym_k8s_real
 ```
 
-Or run this command in `agents/Q_Agent_*.ipynb`:
 
-```shell
-  $ !pip install -e ../gym_k8s_real
-```
 Install once is enough.
 
 
-#### There are three environments in total:
+#### There are four environments in total:
 1. `k8s-env-discrete-state-discrete-action-v0`: base discrete environment with reward function = 1\*Rres + 1.5\*Rperf; 
 2. `k8s-env-discrete-state-discrete-action-v1`: base discrete environment with reward function = 1.5\*Rres + 1\*Rperf;
 3. `k8s-env-discrete-state-discrete-action-v2`: base discrete environment with reward function = 2\*Rres + 0.5\*Rperf;
@@ -31,25 +27,49 @@ Install once is enough.
   $ jupyter notebook
 ```
 
-#### There are three agents in total:
-1. `QAgent_1.5Rperf`: the simple Q-learning agent for base environment and reward function = 1\*Rres + 1.5\*Rperf;
-2. `QAgent_2Rres`: the simple Q-learning agent for base environment and reward function = 2\*Rres + 0.5\*Rperf; 
-2. `QAgent_5Actions`: the simple Q-learning agent for environment with five actions. 
+#### There is one agent implemented with DQN algorithm:
+1. `DQN_agent`: the simple DQN agent for base environment and reward function = xxx;
 
-## Metrics
-#### cpu utilization, number of pods
-obtained from HPA for proxy pod
+## Metrics(discrete)
+#### Cluster Status
+1. CPU utilization: average percent of CPU utilization of all pods on each cluster or average percent of CPU utilization of all cluster on each pod;
+2. Placement of pods: the index of allocated clusters with active pods
+3. Number of active pods on each cluster;
 
-#### latency(request time)
-obtained from lz-04 server, which sends multiple requests and uses the average handling time as latency
+#### Performance/SLA
+1. Latency(request time): The ratio of average response time to the SLA response time
 
-## Results visualization
-#### training data
-Q-table for the Q-learning agent is stored in `Q-env-discrete-state-discrete-action-data_*.npy` of each agent folder. 
 
-Historical data of each training round, including states of the system, taken action and reward, is stored in `k8s_historical_states_discrete_*.csv` of each agent folder.
+#### Data
+1. CPU utilization: 0%–20%, 20%–40%, 40%–60%, 60%–80%, 80%–100%, 100%-150%, greater than 150%;
+2. Placement of pods: {1}, {2}, {3}, {1,2}, {1,3}, {2,3}, {1,2,3};
+3. Number of active pods on each cluster: 0, 1-2, 3-4, 5-6, 7-8, 9-10;
+4. Latency: 0%–20%, 20%–40%, 40%–60%, 60%–80%, 80%–100%, 100%-150%, greater than 150%;
+5. Size: 7 CPU utilization * 3 clusters + 7 placement * 3 functions  + 6 no. of pods * 3 clusters + 1 latency = 61 input neurons in the DQN network
 
-#### plots
-Results are plotted in `ResultsVis_*.ipynb` of each agent folder. 
+## Action
+#### Definition
+[cluster_idx, change in number of pods]: change (increment or decrement) the cluster number as in the dictionary key values, increase or decrease pods' number one at a time (scale in or out), or do nothing.
+
+#### Data
+1. Possible states: [1,+1], [1,-1], [2,+1], [2, -1], [3, +1], [3, -1], [0,0]
+2. Size: _7 actions for each function_ * 3 functions = 21 output neurons in the DQN network
+
+
+## Reward
+#### Overall Reward
+R_all = \alpha R_res + \beta R_{perf}
+
+1. do we need to change the **range**?
+2. how to set the **weights** between resource reward and performance reward?
+
+#### Resource Reward
+1. will the max pod limit for each function be the same?
+2. how to combine each part? weighted sum or normal sum? 
+
+
+#### Performance Reward
+No change
+
 
 

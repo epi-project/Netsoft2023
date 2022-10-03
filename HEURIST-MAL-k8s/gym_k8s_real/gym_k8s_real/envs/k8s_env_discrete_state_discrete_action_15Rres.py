@@ -379,56 +379,6 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
 
         return
 
-        
-    def _create_hpa(self, threshold):
-        v2 = client.AutoscalingV2beta2Api()
-
-        my_metrics = []
-        if threshold != 0:
-            my_metrics.append(
-                client.V2beta2MetricSpec(
-                    type='Resource', resource=client.V2beta2ResourceMetricSource(
-                        name='cpu', target=client.V2beta2MetricTarget(
-                            average_utilization=threshold, type='Utilization')
-                    )
-                )
-            )
-
-        if len(my_metrics) > 0:
-            my_conditions = []
-            my_conditions.append(client.V2beta2HorizontalPodAutoscalerCondition(
-                status='True', type='AbleToScale')
-            )
-
-            status = client.V2beta2HorizontalPodAutoscalerStatus(
-                conditions=my_conditions, current_replicas=1, desired_replicas=1
-            )
-
-            body = client.V2beta2HorizontalPodAutoscaler(
-                api_version='autoscaling/v2beta2',
-                kind='HorizontalPodAutoscaler',
-                metadata=client.V1ObjectMeta(name=self.app_name),
-                spec=client.V2beta2HorizontalPodAutoscalerSpec(
-                    max_replicas=self.MAX_PODS,
-                    min_replicas=self.MIN_PODS,
-                    metrics=my_metrics,
-                    scale_target_ref=client.V2beta2CrossVersionObjectReference(
-                        kind='Deployment', name=self.app_name, api_version='apps/v1'
-                    ),
-                    behavior=client.V2beta2HorizontalPodAutoscalerBehavior(scale_down = client.V2beta2HPAScalingRules(
-                    stabilization_window_seconds=30, select_policy = 'Max', policies = [client.V2beta2HPAScalingPolicy(
-                    type = 'Pods', value = 5, period_seconds = 60)]))
-                ),
-                status=status
-            )
-
-            # Create new HPA with updated thresholds
-            try:
-                api_response = v2.create_namespaced_horizontal_pod_autoscaler(namespace='default', body=body, pretty=True)
-                print('Created new namespaced_horizontal_pod_autoscaler without exception')
-            except Exception:
-                print('Created new namespaced_horizontal_pod_autoscaler')
-
     def _get_discrete(self, number):
         """
         Get a number and return the discrete level it belongs to
