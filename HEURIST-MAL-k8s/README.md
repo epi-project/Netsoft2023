@@ -32,7 +32,7 @@ Install once is enough.
 
 ## Metrics(discrete)
 #### Cluster Status
-1. CPU utilization: average percent of CPU utilization of all pods on each cluster or average percent of CPU utilization of all cluster on each pod;
+1. CPU utilization: average percent of CPU utilization of all pods on each cluster;
 2. Placement of pods: the index of allocated clusters with active pods
 3. Number of active pods on each cluster;
 
@@ -52,18 +52,21 @@ Install once is enough.
 [cluster_idx, change in number of pods]: change (increment or decrement) the cluster number as in the dictionary key values, increase or decrease pods' number one at a time (scale in or out), or do nothing.
 
 #### Data
-1. Possible states: [1,+1], [1,-1], [2,+1], [2, -1], [3, +1], [3, -1], [0,0]
-2. Size: _7 actions for each function_ * 3 functions = 21 output neurons in the DQN network
+1. Possible states: [1,+1], [1,-1], [2,+1], [2, -1], [3, +1], [3, -1], [0,0];
+2. Size: _7 actions for each function_ * 3 functions + 2 actions for proxy config = 23 output neurons in the DQN network;
+3. 
 
 
 ## Reward
 #### Overall Reward
 R_all = \alpha R_res + \beta R_{perf}
 
-1. do we need to change the **range**?
-2. how to set the **weights** between resource reward and performance reward?
+1. do we need to change the **range**? No
+2. how to set the **weights** between resource reward and performance reward? More fine-tune
 
 #### Resource Reward
+max limit will be the same; normal sum and average
+
 1. will the max pod limit for each function be the same?
 2. how to combine each part? weighted sum or normal sum? 
 
