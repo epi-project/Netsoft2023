@@ -1,4 +1,5 @@
 import datetime
+from ipaddress import ip_address
 import math
 import random
 import time
@@ -30,14 +31,19 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
     def __init__(self, timestep_duration, app_names, app_configs, cluster_names, sla_latency,
             sla_host, sla_latency_metric_name, max_pods, min_pods):
         config.load_kube_config()
-
+        self.proxy_dict = {0: 'proxy-1', 1: 'proxy-2', 2: 'proxy-3', 3: 'proxy-4', 4: 'proxy-5', 5: 'proxy-6'}
+        #[firewall], [encrypt], [e-f], [f-e], [f-e-d], [e-f-d]
+        self.ip_proxy = [[''], [''], ['', ''], ['', ''], ['', '', ''], ['', '', '']]
         # General variables defining the environment
         # Get following info from k8s
         self.num_cluster = len(cluster_names)
         self.num_app = len(app_names)
+        self.num_configs = len(app_configs)
+        #curr_configs[i][j][k]: deployments of kth configs of ith function on jth cluster
+        self.curr_configs = [[[0 for k in range(self.num_configs)] for j in range(self.num_cluster)] for i in range(self.num_app)] 
         self.num_states = 7 * self.num_cluster + (2 ** self.num_cluster) * self.num_app + 6 * self.num_cluster + 7
         #total number of actions
-        self.num_actions = 7 * self.num_app + sum(app_configs)
+        self.num_actions = self.num_cluster * self.num_app * self.num_configs
         P = {
             state: {
                 action: [] for action in range(self.num_actions)
@@ -48,7 +54,10 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
         self.MAX_PODS = max_pods
         self.MIN_PODS = min_pods
         self.timestep_duration = timestep_duration
+        #app_names: ['firewall', 'encrypt', 'decrypt']
         self.app_names = app_names
+        #app_configs: ['s', 'm', 'l']
+        self.app_configs = app_configs
         self.cluster_names = cluster_names
         self.sla_latency = float(sla_latency)
         self.sla_host = sla_host
@@ -84,33 +93,228 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
             dt_dict : Dict
                 dictionary of formatted date and time.
         """
-        encoded_observation, now_observation = self._get_state()
-        if action == 0 and now_observation[1] <= 20:
-            return now_observation, 0, self.done, encoded_observation
-        if action == 2 and now_observation[1] >= 80:
-            return now_observation, 0, self.done, encoded_observation
-#         if action == 1:
-#             reward = self._get_reward(now_observation)
-#             return now_observation, reward, self.done, encoded_observation
         
-        self._take_action(action)  # Create HPA
+        self._take_action(action)  # Deploy or remove configs of functions
         wait_time = self.timestep_duration * 60
         time.sleep(wait_time)  # Wait timestep_duration minutes for the changes to take place
 
         encoded_observation, real_observation = self._get_state()
         reward = self._get_reward(real_observation)
 
-        if -1 in self.decode(encoded_observation):
-            self.done = True
-            reward = 0
-
-        now = datetime.datetime.now()
-        dt_string = now.strftime('%d/%m/%Y %H:%M:%S')
-        dt_dict = {
-            'datetime': dt_string
-        }
-
         return real_observation, reward, self.done, encoded_observation
+
+    def _get_reward(self, real_observation):
+        """
+        Calculate reward value: The environment receives the current values of
+        pod_number and cpu/memory metric values that correspond to the current
+        state of the system s. The reward value r is calculated based on two
+        criteria:
+        (i)  the amount of resources acquired,
+             which directly determines the cost
+        (ii) the number of pods needed to support the received load.
+        """
+
+        (cpu_states,
+        pod_states,
+        placement,
+        latency) = real_observation
+
+        reward_min = 0
+        reward_max = 25
+        reward = 0
+
+        pod_weight = 1.5
+        throughput_weight = 1
+
+        d = 5.0  # this is a hyperparameter of the reward function
+
+        #计算throughput的reward
+        # throughput_ratio = self.sla_throughput / (pod_throughput+1)
+
+        #用latency计算reward
+        latency_ratio = latency / self.sla_latency
+        pod_number = sum(pod_states)
+
+        if pod_number == 1 and latency_ratio <= 1:
+            return reward_max
+        elif latency_ratio > 5:
+            return reward_min
+
+        pod_reward = -10 / (self.MAX_PODS - 1) * pod_number \
+            + 10 * self.MAX_PODS / (self.MAX_PODS - 1)
+        reward += pod_weight * pod_reward
+
+        #用throughput计算reward
+        # throughout_ref_value = 1
+        # if throughput_ratio < throughout_ref_value:
+        #     throughput_reward = 10 * pow(math.e, -0.3 * d * throughput_ratio)
+        # else:
+        #     throughput_reward = 10 * pow(math.e, -10 * d * throughput_ratio)
+        # reward += throughput_weight * throughput_reward
+
+        #用latency计算reward
+        latency_ref_value = 1
+        if latency_ratio < latency_ref_value:
+            throughput_reward = 10 * pow(math.e, -0.3 * d * latency_ratio)
+        else:
+            throughput_reward = 10 * pow(math.e, -10 * d * (latency_ratio - latency_ref_value))
+        reward += throughput_weight * throughput_reward
+
+        return reward
+
+    def _take_action(self, config_idx, app_idx, cluster_idx, action, proxy_idx):
+        #deploy the config_idx config of app_idx function on cluster_idx cluster
+        if action == 1:
+            #config_idx config of app_idx function already exists
+            for i in range(self.num_cluster):
+                if self.curr_configs[app_idx][i][config_idx] == 1:
+                    return
+            self._create_action(config_idx, app_idx, cluster_idx, proxy_idx)
+        if action == -1:
+            #config_idx config of app_idx function not exists
+            for i in range(self.num_cluster):
+                if self.curr_configs[app_idx][i][config_idx] == 1:
+                    return
+            self._remove_action(config_idx, app_idx, cluster_idx, proxy_idx)
+
+        if action == 0:
+            self._no_action(config_idx, app_idx, cluster_idx, proxy_idx)
+
+    def _remove_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
+        cluster = self.cluster_names[cluster_idx]
+        #get cluster IP of pod to be removed
+        output = os.popen('kubectl get pod -o wide --context=' + cluster)
+        sizes = ['s', 'm', 'l']
+        #the name of deployment
+        deploy_name = self.app_names[app_idx] + '-' + sizes[config_idx]
+        #TO-DO: analyze returned content to get IP
+        ip = ''
+        output = os.popen('kubectl delete ' + deploy_name + ' --context=' + cluster)
+        self._remove_proxy(app_idx, cluster, ip)
+        return 
+
+    def _create_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
+        cluster = self.cluster_names[cluster_idx]
+        sizes = ['s', 'm', 'l']
+        #the name of deployment file
+        file_name = self.app_names[app_idx] + '-' + sizes[config_idx] + '.yaml'
+        output = os.popen('kubectl apply -f ' + file_name + ' --context=' + cluster)
+        #TO-DO: analyze returned content to get IP
+        ip = ''
+        res = self._assign_proxy(ip, config_idx, app_idx, proxy_idx, cluster)
+        return 
+
+
+    def _no_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
+        cluster = self.cluster_names[cluster_idx]
+        #get app_name
+        app_name = ''
+        #get ip
+        output = os.popen('kubectl get pod -o wide --context=' + cluster)
+        #TO-DO: analyze returned content to get IP
+        ip = ''
+        res = self._assign_proxy(ip, config_idx, app_idx, proxy_idx, cluster)
+        return res
+
+    def _get_most(self, app_idx):
+        ip = ""
+        return ip
+
+    def _remove_proxy(self, app_idx, cluster, ip):
+        new_ip = self._get_most(app_idx)
+        proxys = set()
+        for i in range(len(self.ip_proxy)):
+            if i == 0 and app_idx == 0 and self.ip_proxy[i][app_idx] == ip:
+                self.ip_proxy[i][app_idx] = new_ip
+            if i == 1 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
+                self.ip_proxy[i][app_idx-1] = new_ip
+            if i == 2 and app_idx == 0 and self.ip_proxy[i][app_idx+1] == ip:
+                self.ip_proxy[i][app_idx+1] = new_ip
+            if i == 2 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
+                self.ip_proxy[i][app_idx-1] = new_ip
+            if i == 3 and app_idx < 2 and self.ip_proxy[i][app_idx] == ip:
+                self.ip_proxy[i][app_idx] = new_ip
+            if i == 4 and app_idx <= 2 and self.ip_proxy[i][app_idx] == ip:
+                self.ip_proxy[i][app_idx] = new_ip
+            if i == 5 and app_idx == 0 and self.ip_proxy[i][app_idx+1] == ip:
+                self.ip_proxy[i][app_idx+1] = new_ip
+            if i == 5 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
+                self.ip_proxy[i][app_idx-1] = new_ip
+            if i == 5 and app_idx == 2 and self.ip_proxy[i][app_idx] == ip:
+                self.ip_proxy[i][app_idx] = new_ip
+        output = os.popen("kubectl patch deployment proxy --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args -- context=" + cluster)
+            
+
+    def _assign_proxy(self, ip, app_idx, proxy_idx, cluster):
+        if proxy_idx == 0 and app_idx == 0:
+            self.ip_proxy[proxy_idx][app_idx] = ip
+        elif proxy_idx == 1 and app_idx == 1:
+            self.ip_proxy[proxy_idx][app_idx-1] = ip
+        elif proxy_idx == 2 and app_idx == 0:
+            self.ip_proxy[proxy_idx][app_idx+1] = ip
+        elif proxy_idx == 2 and app_idx == 1:
+            self.ip_proxy[proxy_idx][app_idx-1] = ip
+        elif proxy_idx == 3 and app_idx < 2:
+            self.ip_proxy[proxy_idx][app_idx] = ip
+        elif proxy_idx == 4 and app_idx <= 2:
+            self.ip_proxy[proxy_idx][app_idx] = ip
+        elif proxy_idx == 5 and app_idx == 0:
+            self.ip_proxy[proxy_idx][app_idx+1] = ip
+        elif proxy_idx == 5 and app_idx == 1:
+            self.ip_proxy[proxy_idx][app_idx-1] = ip
+        elif proxy_idx == 5 and app_idx == 2:
+            self.ip_proxy[proxy_idx][app_idx] = ip
+        #unreasonable conditions
+        else:
+            return -1
+        #concatenate ip address
+        ip_str = ''
+        for item in proxy_idx:
+            #incomplete ip address
+            if item == "":
+                return -2
+            ip_str += "-c,"
+            ip_str += "socks6://<BF-IP:PORT,"
+        output = os.popen("kubectl patch deployment proxy --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args', 'value': [" 
+        + ip_str + "]}] --context=" + cluster)
+        #successful
+        return 1
+    
+    def _create_pod(number, appName, containerUrl, commands, cpuReq, cpuLimit, contextName):
+        config.load_kube_config(context=contextName)
+        v1 = client.AppsV1Api()
+        body = client.V1Deployment(
+            api_version='apps/v1',
+            kind='Deployment',
+            metadata=client.V1ObjectMeta(name=appName, labels={'app': appName}),
+            spec=client.V1DeploymentSpec(
+                replicas=number,
+                selector=client.V1LabelSelector(match_labels={'app': appName}),
+                strategy=client.V1DeploymentStrategy(),
+                template=client.V1PodTemplateSpec(
+                    metadata=client.V1ObjectMeta(labels={'app': appName}),
+                    spec=client.V1PodSpec(
+                        containers=[client.V1Container(
+                            image=containerUrl,
+                            name=appName,
+                            resources=client.V1ResourceRequirements(
+                                limits={'cpu': cpuLimit},
+                                requests={'cpu': cpuReq}
+                            )
+                        )],
+                        restart_policy='Always'
+                    )
+                )
+            ),
+            status= client.V1DeploymentStatus()
+        )
+        # Create new HPA with updated thresholds
+        try:
+            api_response = v1.replace_namespaced_deployment(name=appName, namespace='default', body=body, pretty=True)
+            print('Modified deployment for function ' + appName)
+        except Exception:
+            api_response = v1.create_namespaced_deployment(namespace='default', body=body, pretty=True)
+            print('Created deployment for function ' + appName)
 
     #function to get state
     def _get_state(self):
@@ -286,38 +490,4 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
         return res
 
 
-    def _create_pod(number, appName, containerUrl, commands, cpuReq, cpuLimit, contextName):
-        config.load_kube_config(context=contextName)
-        v1 = client.AppsV1Api()
-        body = client.V1Deployment(
-            api_version='apps/v1',
-            kind='Deployment',
-            metadata=client.V1ObjectMeta(name=appName, labels={'app': appName}),
-            spec=client.V1DeploymentSpec(
-                replicas=number,
-                selector=client.V1LabelSelector(match_labels={'app': appName}),
-                strategy=client.V1DeploymentStrategy(),
-                template=client.V1PodTemplateSpec(
-                    metadata=client.V1ObjectMeta(labels={'app': appName}),
-                    spec=client.V1PodSpec(
-                        containers=[client.V1Container(
-                            image=containerUrl,
-                            name=appName,
-                            resources=client.V1ResourceRequirements(
-                                limits={'cpu': cpuLimit},
-                                requests={'cpu': cpuReq}
-                            )
-                        )],
-                        restart_policy='Always'
-                    )
-                )
-            ),
-            status= client.V1DeploymentStatus()
-        )
-        # Create new HPA with updated thresholds
-        try:
-            api_response = v1.replace_namespaced_deployment(name=appName, namespace='default', body=body, pretty=True)
-            print('Modified deployment for function ' + appName)
-        except Exception:
-            api_response = v1.create_namespaced_deployment(namespace='default', body=body, pretty=True)
-            print('Created deployment for function ' + appName)
+    
