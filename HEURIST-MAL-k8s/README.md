@@ -37,12 +37,12 @@ Install once is enough.
 1. Latency(request time): The ratio of average response time to the SLA response time
 
 
-#### Data
+#### Data(two clusters)
 1. CPU utilization: 0%–20%, 20%–40%, 40%–60%, 60%–80%, 80%–100%, 100%-150%, greater than 150%;
-2. Placement of pods: {1}, {2}, {3}, {1,2}, {1,3}, {2,3}, {1,2,3};
+2. Placement of functions: {0}, {1}, {2}, {1,2};
 3. Number of active pods on each cluster: 0, 1-2, 3-4, 5-6, 7-8, 9-10;
 4. Latency: 0%–20%, 20%–40%, 40%–60%, 60%–80%, 80%–100%, 100%-150%, greater than 150%;
-5. Size: 7 CPU utilization * 2 clusters + 7 placement * 2 functions  + 6 no. of pods * 2 clusters + 7 latency = 47 input neurons in the DQN network
+5. Size: 7 CPU utilization * 2 clusters + 4 placement * 3 functions  + 6 no. of pods * 2 clusters + 7 latency = 45 input neurons in the DQN network
 
 ## Action
 #### Definition
