@@ -50,7 +50,7 @@ Each function: [cluster-idx, remove/create/do nothing, config-idx, proxy-idx]: c
 
 #### Data
 1. Possible states: [1-2,0/1/-1,1-3,1-5];
-2. Size: (2+3+3+5)action neurons * 3 functions = 39 output neurons in the DQN network;
+2. Size: (2\*3\*3\*5)action neurons * 3 functions = 270 output neurons in the DQN network;
 
 ## Reward
 #### Overall Reward
