@@ -20,7 +20,7 @@ hundred = 4
 hundred_fifty = 5
 two_hundred = 6
 
-class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
+class K8sEnvDQN(discrete.DiscreteEnv):
     metadata = {
         'render.modes': ['human']
     }
@@ -29,21 +29,25 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
     #app_configs: store the number of different configs of different functions; eg[2, 3, 2]
     #cluster_names: store the names of clusters; eg: []
     def __init__(self, timestep_duration, app_names, app_configs, cluster_names, sla_latency,
-            sla_host, sla_latency_metric_name, max_pods, min_pods):
+            sla_host, sla_latency_metric_name, max_pods, min_pods, app_dict, config_path, changes):
         config.load_kube_config()
         self.proxy_dict = {0: 'proxy-1', 1: 'proxy-2', 2: 'proxy-3', 3: 'proxy-4', 4: 'proxy-5', 5: 'proxy-6'}
         #[firewall], [encrypt], [e-f], [f-e], [f-e-d], [e-f-d]
-        self.ip_proxy = [[''], [''], ['', ''], ['', ''], ['', '', ''], ['', '', '']]
+        self.ip_proxy = [['miss', '', ''], ['miss', '', ''], ['miss', 'miss', ''], ['miss', 'miss', ''], ['miss', 'miss', 'miss'], ['miss', 'miss', 'miss']]
         # General variables defining the environment
         # Get following info from k8s
         self.num_cluster = len(cluster_names)
         self.num_app = len(app_names)
         self.num_configs = len(app_configs)
+        self.app_dict = app_dict
+        #[0, 1, 2]: 0-remove, 1-no action, 2-create
+        self.changes = changes
+        self.config_path = config_path
         #curr_configs[i][j][k]: deployments of kth configs of ith function on jth cluster
         self.curr_configs = [[[0 for k in range(self.num_configs)] for j in range(self.num_cluster)] for i in range(self.num_app)] 
         self.num_states = 7 * self.num_cluster + (2 ** self.num_cluster) * self.num_app + 6 * self.num_cluster + 7
         #total number of actions
-        self.num_actions = self.num_cluster * self.num_app * self.num_configs
+        self.num_actions = self.num_cluster * self.num_configs * len(self.changes) * len(self.ip_proxy) * self.num_app
         P = {
             state: {
                 action: [] for action in range(self.num_actions)
@@ -70,9 +74,17 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
             self, self.num_states, self.num_actions, P, initial_state_distrib
         )
 
+    def d_state(self):
+        return self._get_state()
+
+    def d_action(self, action_idx):
+        action = self._decode_action(action_idx)
+        return self._take_action(action[2], action[4], action[0], action[1], action[3])
+
+
     #Function to take step
 
-    def step(self, action):
+    def step(self, action_idx):
         """
         Returns
         -------
@@ -93,8 +105,8 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
             dt_dict : Dict
                 dictionary of formatted date and time.
         """
-        
-        self._take_action(action)  # Deploy or remove configs of functions
+        action = self._decode_action(action_idx)
+        self._take_action(self, action[2], action[4], action[0], action[1], action[3]) # Deploy or remove configs of functions
         wait_time = self.timestep_duration * 60
         time.sleep(wait_time)  # Wait timestep_duration minutes for the changes to take place
 
@@ -164,119 +176,248 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
 
     def _take_action(self, config_idx, app_idx, cluster_idx, action, proxy_idx):
         #deploy the config_idx config of app_idx function on cluster_idx cluster
-        if action == 1:
+        if action == 2:
             #config_idx config of app_idx function already exists
             for i in range(self.num_cluster):
                 if self.curr_configs[app_idx][i][config_idx] == 1:
                     return
             self._create_action(config_idx, app_idx, cluster_idx, proxy_idx)
-        if action == -1:
+        if action == 0:
             #config_idx config of app_idx function not exists
             for i in range(self.num_cluster):
                 if self.curr_configs[app_idx][i][config_idx] == 1:
                     return
             self._remove_action(config_idx, app_idx, cluster_idx, proxy_idx)
 
-        if action == 0:
+        if action == 1:
             self._no_action(config_idx, app_idx, cluster_idx, proxy_idx)
+
+
+    def _encode_action(self, cluster_idx, change_idx, config_idx, proxy_idx, app_idx):
+        """
+        Encode the discrete action values in one single number.
+        Clusters in {0, 1}
+        Change_idx, config_idx in {0, 1, 2}
+        Proxy_idx in {0, 1, 2, 3, 4}
+        App_idx in {0, 1, 2}
+        """
+        code = cluster_idx
+        code *= 3
+        code += change_idx
+        code *= 3
+        code += config_idx
+        code *= 5
+        code += proxy_id
+        code *= 3
+        code += app_idx
+        return code
+
+
+    def _decode_action(self, i):
+        out = []
+        out.append(i % 3)
+        i //= 3
+        out.append(i % 5)
+        i //= 5
+        out.append(i % 3)
+        i //= 3
+        out.append(i % 3)
+        i //= 3
+        out.append(i)
+        return list(reversed(out))
 
     def _remove_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
         cluster = self.cluster_names[cluster_idx]
         #get cluster IP of pod to be removed
-        output = os.popen('kubectl get pod -o wide --context=' + cluster)
+        output = os.popen('kubectl get pod -o wide --context=' + cluster).read()
         sizes = ['s', 'm', 'l']
         #the name of deployment
-        deploy_name = self.app_names[app_idx] + '-' + sizes[config_idx]
+        deploy_name = sizes[config_idx] + self.app_names[app_idx]
         #TO-DO: analyze returned content to get IP
-        ip = ''
-        output = os.popen('kubectl delete ' + deploy_name + ' --context=' + cluster)
-        self._remove_proxy(app_idx, cluster, ip)
+        ip = set()
+        lines = output.split("\n")
+        for line in lines[1:-1]:
+            items = line.split()
+            idx = items[0].index('-')
+            if items[0][:idx] == deploy_name:
+                s = items[5]
+                if s != '<none>':
+                    ip.add(items[5]) 
+        os.popen('kubectl delete deployment ' + deploy_name + ' --context=' + cluster)
+        for cluster_name in self.cluster_names:
+            self._remove_proxy(app_idx, cluster_name, ip)
         return 
 
     def _create_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
         cluster = self.cluster_names[cluster_idx]
         sizes = ['s', 'm', 'l']
         #the name of deployment file
-        file_name = self.app_names[app_idx] + '-' + sizes[config_idx] + '.yaml'
-        output = os.popen('kubectl apply -f ' + file_name + ' --context=' + cluster)
+        file_name = self.app_names[app_idx] + '-' + sizes[config_idx].upper() + '.yaml'
+        os.popen('kubectl apply -f ' + self.config_path + file_name + ' --context=' + cluster)
         #TO-DO: analyze returned content to get IP
-        ip = ''
-        res = self._assign_proxy(ip, config_idx, app_idx, proxy_idx, cluster)
+        sizes = ['s', 'm', 'l']
+        #the name of deployment
+        deploy_name = sizes[config_idx] + self.app_names[app_idx]
+        #TO-DO: analyze returned content to get IP
+        ip = set()
+        output = os.popen('kubectl get pod -o wide --context=' + cluster).read()
+        lines = output.split("\n")
+        for line in lines[1:-1]:
+            items = line.split()
+            idx = items[0].index('-')
+            if items[0][:idx] == deploy_name:
+                s = items[5]
+                if s != '<none>':
+                    ip.add(items[5]) 
+        res = self._assign_proxy(ip, app_idx, proxy_idx, cluster)
         return 
 
 
     def _no_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
         cluster = self.cluster_names[cluster_idx]
-        #get app_name
-        app_name = ''
         #get ip
         output = os.popen('kubectl get pod -o wide --context=' + cluster)
         #TO-DO: analyze returned content to get IP
-        ip = ''
-        res = self._assign_proxy(ip, config_idx, app_idx, proxy_idx, cluster)
+        sizes = ['s', 'm', 'l']
+        #the name of deployment
+        deploy_name = sizes[config_idx] + self.app_names[app_idx]
+        ip = set()
+        lines = output.split("\n")
+        for line in lines[1:-1]:
+            items = line.split()
+            idx = items[0].index('-')
+            if items[0][:idx] == deploy_name:
+                s = items[5]
+                if s != '<none>':
+                    ip.add(items[5]) 
+        res = self._assign_proxy(ip, app_idx, proxy_idx, cluster)
         return res
 
-    def _get_most(self, app_idx):
-        ip = ""
+    def _get_ip(self, app_idx):
+        for cluster in self.cluster_names:
+            output = os.popen('kubectl get pod -o wide --context=' + cluster).read()
+            #the name of deployment
+            app_name = self.app_names[app_idx]
+            #TO-DO: analyze returned content to get IP
+            ip = set()
+            lines = output.split("\n")
+            for line in lines[1:-1]:
+                items = line.split()
+                idx = items[0].index('-')
+                if items[0][1:idx] == app_name:
+                    s = items[5]
+                    if s != '<none>':
+                        ip.add(items[5]) 
         return ip
 
     def _remove_proxy(self, app_idx, cluster, ip):
-        new_ip = self._get_most(app_idx)
+        new_ip = self._get_ip(app_idx)
         proxys = set()
-        for i in range(len(self.ip_proxy)):
-            if i == 0 and app_idx == 0 and self.ip_proxy[i][app_idx] == ip:
-                self.ip_proxy[i][app_idx] = new_ip
-            if i == 1 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
-                self.ip_proxy[i][app_idx-1] = new_ip
-            if i == 2 and app_idx == 0 and self.ip_proxy[i][app_idx+1] == ip:
-                self.ip_proxy[i][app_idx+1] = new_ip
-            if i == 2 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
-                self.ip_proxy[i][app_idx-1] = new_ip
-            if i == 3 and app_idx < 2 and self.ip_proxy[i][app_idx] == ip:
-                self.ip_proxy[i][app_idx] = new_ip
-            if i == 4 and app_idx <= 2 and self.ip_proxy[i][app_idx] == ip:
-                self.ip_proxy[i][app_idx] = new_ip
-            if i == 5 and app_idx == 0 and self.ip_proxy[i][app_idx+1] == ip:
-                self.ip_proxy[i][app_idx+1] = new_ip
-            if i == 5 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
-                self.ip_proxy[i][app_idx-1] = new_ip
-            if i == 5 and app_idx == 2 and self.ip_proxy[i][app_idx] == ip:
-                self.ip_proxy[i][app_idx] = new_ip
-        output = os.popen("kubectl patch deployment proxy --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args -- context=" + cluster)
-            
+        if len(new_ip) > 0:
+            for i in range(len(self.ip_proxy)):
+                if i == 0 and app_idx == 0 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 1 and app_idx == 1 and self.ip_proxy[i][app_idx-1] in ip:
+                    self.ip_proxy[i][app_idx-1] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 2 and app_idx == 0 and self.ip_proxy[i][app_idx+1] in ip:
+                    self.ip_proxy[i][app_idx+1] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 2 and app_idx == 1 and self.ip_proxy[i][app_idx-1] in ip:
+                    self.ip_proxy[i][app_idx-1] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 3 and app_idx < 2 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 4 and app_idx <= 2 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 5 and app_idx == 0 and self.ip_proxy[i][app_idx+1] in ip:
+                    self.ip_proxy[i][app_idx+1] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 5 and app_idx == 1 and self.ip_proxy[i][app_idx-1] in ip:
+                    self.ip_proxy[i][app_idx-1] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+                if i == 5 and app_idx == 2 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = random.choice(list(new_ip))
+                    self._deploy_proxy(i, cluster)
+        else:
+            for i in range(len(self.ip_proxy)):
+                if i == 0 and app_idx == 0 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 1 and app_idx == 1 and self.ip_proxy[i][app_idx-1] in ip:
+                    self.ip_proxy[i][app_idx-1] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 2 and app_idx == 0 and self.ip_proxy[i][app_idx+1] in ip:
+                    self.ip_proxy[i][app_idx+1] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 2 and app_idx == 1 and self.ip_proxy[i][app_idx-1] in ip:
+                    self.ip_proxy[i][app_idx-1] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 3 and app_idx < 2 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 4 and app_idx <= 2 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 5 and app_idx == 0 and self.ip_proxy[i][app_idx+1] in ip:
+                    self.ip_proxy[i][app_idx+1] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 5 and app_idx == 1 and self.ip_proxy[i][app_idx-1] in ip:
+                    self.ip_proxy[i][app_idx-1] = "miss"
+                    self._deploy_proxy(i, cluster)
+                if i == 5 and app_idx == 2 and self.ip_proxy[i][app_idx] in ip:
+                    self.ip_proxy[i][app_idx] = "miss"
+                    self._deploy_proxy(i, cluster)
+        
+    def _deploy_proxy(self, proxy_id, cluster):
+        ip_str = ""
+        for idx in range(3):
+            #this chain is incomplete
+            if self.ip_proxy[proxy_id][idx] == "miss":
+                return -1
+                
+            if self.ip_proxy[proxy_id][idx] != "":
+                ip_str += "-c,"
+                ip_str += "socks6://<BF-IP:PORT,"
+        proxy_name = "proxy" + proxy_id
+        os.popen("kubectl patch deployment" + proxy_name + " --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args', 'value': [" 
+        + ip_str + "]}] --context=" + cluster)
 
     def _assign_proxy(self, ip, app_idx, proxy_idx, cluster):
         if proxy_idx == 0 and app_idx == 0:
-            self.ip_proxy[proxy_idx][app_idx] = ip
+            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 1 and app_idx == 1:
-            self.ip_proxy[proxy_idx][app_idx-1] = ip
+            self.ip_proxy[proxy_idx][app_idx-1] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 2 and app_idx == 0:
-            self.ip_proxy[proxy_idx][app_idx+1] = ip
+            self.ip_proxy[proxy_idx][app_idx+1] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 2 and app_idx == 1:
-            self.ip_proxy[proxy_idx][app_idx-1] = ip
+            self.ip_proxy[proxy_idx][app_idx-1] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 3 and app_idx < 2:
-            self.ip_proxy[proxy_idx][app_idx] = ip
+            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 4 and app_idx <= 2:
-            self.ip_proxy[proxy_idx][app_idx] = ip
+            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 5 and app_idx == 0:
-            self.ip_proxy[proxy_idx][app_idx+1] = ip
+            self.ip_proxy[proxy_idx][app_idx+1] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 5 and app_idx == 1:
-            self.ip_proxy[proxy_idx][app_idx-1] = ip
+            self.ip_proxy[proxy_idx][app_idx-1] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         elif proxy_idx == 5 and app_idx == 2:
-            self.ip_proxy[proxy_idx][app_idx] = ip
+            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
+            self._deploy_proxy(proxy_idx, cluster)
         #unreasonable conditions
         else:
             return -1
-        #concatenate ip address
-        ip_str = ''
-        for item in proxy_idx:
-            #incomplete ip address
-            if item == "":
-                return -2
-            ip_str += "-c,"
-            ip_str += "socks6://<BF-IP:PORT,"
-        output = os.popen("kubectl patch deployment proxy --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args', 'value': [" 
-        + ip_str + "]}] --context=" + cluster)
+            
         #successful
         return 1
     
@@ -327,15 +468,17 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
                 cpu += self._get_average_cpu(app, cluster)
                 if cpu > 0:
                     count += 1
-            cpu_states.append(self._get_discrete(cpu/count * 100))
+            cpu_states.append(self._get_discrete(cpu/count * 100 if count > 0 else 0))
         
         #get number_of_pods in all clusters
         pod_states = []
+        d_pod = []
         for cluster in self.cluster_names:
             num = 0
             for app in self.app_names:
                 num += self._get_pods_num(app, cluster)
             pod_states.append(self._get_discrete(100 * num / self.MAX_PODS))
+            d_pod.append(num)
         
         #get placement_of_pods in all clusters
         placement = []
@@ -344,15 +487,17 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
             placement.append(self._get_discrete_place(present))
 
         #get latency
-        latency = 100 * self._query_latency(self.sla_latency_metric_name) / self.sla_latency
-        
+        # latency = self._get_discrete(100 * self._query_latency(self.sla_latency_metric_name) / self.sla_latency)
+        latency = self._get_discrete(100 * random.uniform(1,3) / self.sla_latency) # For debug environ
+
         if math.isnan(latency):
             latency = self.sla_latency
 
         #define real observation
         real_observation = [
             cpu_states,
-            pod_states,
+            # pod_states,
+            d_pod,
             placement,
             latency
         ]
@@ -370,19 +515,21 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
     
     #get average_cpu for all pods with app_name on cluster with cluster
     #return 0.xx
-    def _get_average_cpu(self, app_name, cluster, cpuReqs):
+    def _get_average_cpu(self, app_name, cluster):
         aver_cpu = 0
         #obtain from metric server and calculate
         output = os.popen('kubectl top pod --context=' + cluster).read()
         lines = output.split("\n")
         numPods = 0
         cpuUsage = 0
-        for line in lines[:-1]:
+        cpuReqs = self.app_dict[app_name]
+        for line in lines[1:-1]:
             items = line.split()
-            if len(items[0]) > 8 and items[0][:8] == app_name:
+            idx = items[0].index('-')
+            if items[0][1:idx] == app_name:
                 numPods += 1
                 cpuUsage += int(items[1][:-1])
-        aver_cpu = cpuUsage / (numPods * cpuReqs) if numPods else 0.0
+        aver_cpu = cpuUsage / (numPods * cpuReqs) if numPods > 0 else 0.0
         # return numPods, cpuUsage / (numPods * cpuReqs)
         return aver_cpu
     
@@ -393,9 +540,10 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
         output = os.popen('kubectl top pod --context=' + cluster).read()
         lines = output.split("\n")
         numPods = 0
-        for line in lines[:-1]:
+        for line in lines[1:-1]:
             items = line.split()
-            if len(items[0]) > 8 and items[0][:8] == app_name:
+            idx = items[0].index('-')
+            if items[0][1:idx] == app_name:
                 numPods += 1
         return numPods
     
@@ -405,7 +553,7 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
         present = [0 for _ in range(len(clusters))]
         for i in range(len(clusters)):
             num = self._get_pods_num(app_name, clusters[i])
-            present[i] = 1 if num else 0
+            present[i] = 1 if num > 0 else 0
         return present
 
     #get latency metric
@@ -465,29 +613,23 @@ class K8sEnvDiscreteStateDiscreteAction15Rres(discrete.DiscreteEnv):
         state = []
         for cpu in cpu_util:
             tmp = [0 for _ in range(7)]
-            tmp[cpu] = 1
+            tmp[cpu-1] = 1
             state += tmp[:]
         
         for pod in pods:
             tmp = [0 for _ in range(6)]
-            tmp[pod] = 1
+            tmp[pod-1] = 1
             state += tmp[:]
         
         for place in places:
             tmp = [0 for _ in range(2 ** self.num_cluster)]
-            tmp[place] = 1
+            tmp[place-1] = 1
             state += tmp[:]
         
         tmp = [0 for _ in range(7)]
-        tmp[latency] = 1
+        tmp[latency-1] = 1
         state += tmp[:]
 
         return state
 
-    #TO-DO: Decode action
-    def _decode_action(action):
-        res = 0
-        return res
 
-
-    

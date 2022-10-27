@@ -10,12 +10,17 @@ register(
     entry_point='gym_k8s_real.envs:K8sEnvDiscreteStateFiveAction',
 )
 
-register(
-    id='k8s-env-discrete-state-discrete-action-v1',
-    entry_point='gym_k8s_real.envs:K8sEnvDiscreteStateDiscreteAction15Rres',
-)
+# register(
+#     id='k8s-env-discrete-state-discrete-action-v1',
+#     entry_point='gym_k8s_real.envs:K8sEnvDiscreteStateDiscreteAction15Rres',
+# )
 
 register(
     id='k8s-env-discrete-state-discrete-action-v2',
     entry_point='gym_k8s_real.envs:K8sEnvDiscreteStateDiscreteAction20Rres',
+)
+
+register(
+    id='k8s-env-dqn-v0',
+    entry_point='gym_k8s_real.envs:K8sEnvDQN',
 )

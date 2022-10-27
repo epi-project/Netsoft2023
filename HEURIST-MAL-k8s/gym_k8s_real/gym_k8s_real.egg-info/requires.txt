@@ -1,4 +1,4 @@
 gym
-requests
 pint
 pyyaml
+requests
