@@ -31,6 +31,7 @@ class K8sEnvDQN(discrete.DiscreteEnv):
     def __init__(self, timestep_duration, app_names, app_configs, cluster_names, sla_latency,
             sla_host, sla_latency_metric_name, max_pods, min_pods, app_dict, config_path, changes):
         config.load_kube_config()
+        self.proxy_cluster = {0: self.cluster_names[0], 1: self.cluster_names[0], 2: self.cluster_names[1], 3: self.cluster_names[1], 4: self.cluster_names[2]}
         self.proxy_dict = {0: 'proxy-1', 1: 'proxy-2', 2: 'proxy-3', 3: 'proxy-4', 4: 'proxy-5', 5: 'proxy-6'}
         #[firewall], [encrypt], [e-f], [f-e], [f-e-d], [e-f-d]
         self.ip_proxy = [['miss', '', ''], ['miss', '', ''], ['miss', 'miss', ''], ['miss', 'miss', ''], ['miss', 'miss', 'miss'], ['miss', 'miss', 'miss']]
@@ -74,16 +75,28 @@ class K8sEnvDQN(discrete.DiscreteEnv):
             self, self.num_states, self.num_actions, P, initial_state_distrib
         )
 
+    #debug the process of obtaining states
     def d_state(self):
         return self._get_state()
 
+    #debug the process of taking action
     def d_action(self, action_idx):
         action = self._decode_action(action_idx)
         return self._take_action(action[2], action[4], action[0], action[1], action[3])
 
+    #reset or initialize k8s cluster
+    def reset(self):
+        #todo: assign unreachable ip_address
+        self.ip_proxy = [['miss', '', ''], ['miss', '', ''], ['miss', 'miss', ''], ['miss', 'miss', ''], ['miss', 'miss', 'miss'], ['miss', 'miss', 'miss']]
+        for proxy_id in range(5):
+            #deploy the proxy pod
+            #configure each proxy
+            self._deploy_proxy(proxy_id)
+
+        return self._get_state()
+
 
     #Function to take step
-
     def step(self, action_idx):
         """
         Returns
@@ -178,17 +191,25 @@ class K8sEnvDQN(discrete.DiscreteEnv):
         #deploy the config_idx config of app_idx function on cluster_idx cluster
         if action == 2:
             #config_idx config of app_idx function already exists
-            for i in range(self.num_cluster):
-                if self.curr_configs[app_idx][i][config_idx] == 1:
-                    return
+            if cluster_idx == 2 and self.curr_configs[app_idx][2][config_idx] == 1:
+                return
+            else:
+                for i in range(2):
+                    if self.curr_configs[app_idx][i][config_idx] == 1:
+                        return
+            self.curr_configs[app_idx][cluster_idx][config_idx] = 1
             self._create_action(config_idx, app_idx, cluster_idx, proxy_idx)
+        #remove the config_idx config of app_idx function on cluster_idx cluster
         if action == 0:
             #config_idx config of app_idx function not exists
-            for i in range(self.num_cluster):
-                if self.curr_configs[app_idx][i][config_idx] == 1:
+            if cluster_idx == 2 and self.curr_configs[app_idx][2][config_idx] == 0:
+                return
+            else:
+                if self.curr_configs[app_idx][0][config_idx] == 0 and self.curr_configs[app_idx][1][config_idx] == 0 :
                     return
+            self.curr_configs[app_idx][cluster_idx][config_idx] = 0
             self._remove_action(config_idx, app_idx, cluster_idx, proxy_idx)
-
+        #assign the config_idx of app_idx function on cluster_idx cluster to proxy_idx proxy
         if action == 1:
             self._no_action(config_idx, app_idx, cluster_idx, proxy_idx)
 
@@ -196,7 +217,7 @@ class K8sEnvDQN(discrete.DiscreteEnv):
     def _encode_action(self, cluster_idx, change_idx, config_idx, proxy_idx, app_idx):
         """
         Encode the discrete action values in one single number.
-        Clusters in {0, 1}
+        Clusters in {0, 1, 2}
         Change_idx, config_idx in {0, 1, 2}
         Proxy_idx in {0, 1, 2, 3, 4}
         App_idx in {0, 1, 2}
@@ -207,7 +228,7 @@ class K8sEnvDQN(discrete.DiscreteEnv):
         code *= 3
         code += config_idx
         code *= 5
-        code += proxy_id
+        code += proxy_idx
         code *= 3
         code += app_idx
         return code
@@ -229,24 +250,58 @@ class K8sEnvDQN(discrete.DiscreteEnv):
     def _remove_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
         cluster = self.cluster_names[cluster_idx]
         #get cluster IP of pod to be removed
-        output = os.popen('kubectl get pod -o wide --context=' + cluster).read()
         sizes = ['s', 'm', 'l']
         #the name of deployment
         deploy_name = sizes[config_idx] + self.app_names[app_idx]
         #TO-DO: analyze returned content to get IP
-        ip = set()
+        serviceIP = ""
+        output = os.popen('kubectl get service -o wide --context=' + cluster).read()
         lines = output.split("\n")
-        for line in lines[1:-1]:
+        port=''
+        which_app = len(deploy_name)
+        for line in lines[:-1]:
             items = line.split()
-            idx = items[0].index('-')
-            if items[0][:idx] == deploy_name:
-                s = items[5]
-                if s != '<none>':
-                    ip.add(items[5]) 
+            if items[0][:which_app] == deploy_name:
+                serviceIP=items[2]+":"+items[4][:4]
         os.popen('kubectl delete deployment ' + deploy_name + ' --context=' + cluster)
-        for cluster_name in self.cluster_names:
-            self._remove_proxy(app_idx, cluster_name, ip)
+        
+        self._reconfig_proxy(app_idx, serviceIP)
         return 
+
+    #TO-DO
+    def _reconfig_proxy(app_idx, ip):
+        newIps = self._get_ip(app_idx)
+        if len(newIp) > 0:
+            for i in range(len(self.ip_proxy)):
+                if i == 0 and app_idx == 0 and self.ip_proxy[i][app_idx] == ip:
+                    self.ip_proxy[i][app_idx] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 1 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
+                    self.ip_proxy[i][app_idx-1] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 2 and app_idx == 0 and self.ip_proxy[i][app_idx+1] == ip:
+                    self.ip_proxy[i][app_idx+1] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 2 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
+                    self.ip_proxy[i][app_idx-1] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 3 and app_idx < 2 and self.ip_proxy[i][app_idx] == ip:
+                    self.ip_proxy[i][app_idx] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 4 and app_idx <= 2 and self.ip_proxy[i][app_idx] == ip:
+                    self.ip_proxy[i][app_idx] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 5 and app_idx == 0 and self.ip_proxy[i][app_idx+1] == ip:
+                    self.ip_proxy[i][app_idx+1] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 5 and app_idx == 1 and self.ip_proxy[i][app_idx-1] == ip:
+                    self.ip_proxy[i][app_idx-1] = random.choice(newIps)
+                    self._deploy_proxy(i)
+                if i == 5 and app_idx == 2 and self.ip_proxy[i][app_idx] == ip:
+                    self.ip_proxy[i][app_idx] = random.choice(newIps)
+                    self._deploy_proxy(i)
+
+
 
     def _create_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
         cluster = self.cluster_names[cluster_idx]
@@ -259,55 +314,59 @@ class K8sEnvDQN(discrete.DiscreteEnv):
         #the name of deployment
         deploy_name = sizes[config_idx] + self.app_names[app_idx]
         #TO-DO: analyze returned content to get IP
-        ip = set()
-        output = os.popen('kubectl get pod -o wide --context=' + cluster).read()
+        serviceIP = ""
+        output = os.popen('kubectl get service -o wide --context=' + cluster).read()
         lines = output.split("\n")
-        for line in lines[1:-1]:
+        port=''
+        which_app = len(deploy_name)
+        for line in lines[:-1]:
             items = line.split()
-            idx = items[0].index('-')
-            if items[0][:idx] == deploy_name:
-                s = items[5]
-                if s != '<none>':
-                    ip.add(items[5]) 
-        res = self._assign_proxy(ip, app_idx, proxy_idx, cluster)
+            if items[0][:which_app] == deploy_name:
+                serviceIP=items[2]+":"+items[4][:4]
+        res = self._assign_proxy(serviceIP, app_idx, proxy_idx, cluster)
         return 
 
 
     def _no_action(self, config_idx, app_idx, cluster_idx, proxy_idx):
         cluster = self.cluster_names[cluster_idx]
         #get ip
-        output = os.popen('kubectl get pod -o wide --context=' + cluster)
         #TO-DO: analyze returned content to get IP
         sizes = ['s', 'm', 'l']
         #the name of deployment
         deploy_name = sizes[config_idx] + self.app_names[app_idx]
-        ip = set()
+        serviceIP = ""
+        output = os.popen('kubectl get service -o wide --context=' + cluster).read()
         lines = output.split("\n")
-        for line in lines[1:-1]:
+        port=''
+        which_app = len(deploy_name)
+        for line in lines[:-1]:
             items = line.split()
-            idx = items[0].index('-')
-            if items[0][:idx] == deploy_name:
-                s = items[5]
-                if s != '<none>':
-                    ip.add(items[5]) 
-        res = self._assign_proxy(ip, app_idx, proxy_idx, cluster)
+            if items[0][:which_app] == deploy_name:
+                serviceIP=items[2]+":"+items[4][:4]
+        res = self._assign_proxy(serviceIP, app_idx, proxy_idx, cluster)
         return res
 
     def _get_ip(self, app_idx):
-        for cluster in self.cluster_names:
-            output = os.popen('kubectl get pod -o wide --context=' + cluster).read()
-            #the name of deployment
-            app_name = self.app_names[app_idx]
-            #TO-DO: analyze returned content to get IP
-            ip = set()
-            lines = output.split("\n")
-            for line in lines[1:-1]:
-                items = line.split()
-                idx = items[0].index('-')
-                if items[0][1:idx] == app_name:
-                    s = items[5]
-                    if s != '<none>':
-                        ip.add(items[5]) 
+        ip = []
+        sizes = ['s', 'm', 'l']
+        for i in range(self.num_cluster):
+            for j in range(self.num_configs):
+                if self.curr_configs[app_idx][i][j] == 1:
+                    cluster = self.cluster_names[i]
+                    #the name of deployment
+                    deploy_name = sizes[i] + self.app_names[app_idx]
+                    #TO-DO: analyze returned content to get IP
+                    serviceIP = ""
+                    output = os.popen('kubectl get service -o wide --context=' + cluster).read()
+                    lines = output.split("\n")
+                    port=''
+                    which_app = len(deploy_name)
+                    for line in lines[:-1]:
+                        items = line.split()
+                        if items[0][:which_app] == deploy_name:
+                            serviceIP=items[2]+":"+items[4][:4]
+                            ip.append(serviceIP)
+
         return ip
 
     def _remove_proxy(self, app_idx, cluster, ip):
@@ -372,48 +431,49 @@ class K8sEnvDQN(discrete.DiscreteEnv):
                     self.ip_proxy[i][app_idx] = "miss"
                     self._deploy_proxy(i, cluster)
         
-    def _deploy_proxy(self, proxy_id, cluster):
-        ip_str = ""
+    #deploy the proxy_id proxy pod
+    def _deploy_proxy(self, proxy_id):
+        newChain = []
         for idx in range(3):
             #this chain is incomplete
-            if self.ip_proxy[proxy_id][idx] == "miss":
-                return -1
-                
             if self.ip_proxy[proxy_id][idx] != "":
-                ip_str += "-c,"
-                ip_str += "socks6://<BF-IP:PORT,"
+                newChain.append('"-c",'+'"socks6://'+self.ip_proxy[proxy_id][idx]+'",')
+        
+        newChain = ''.join(newChain)
+        newChain = newChain[:-1]
+
         proxy_name = "proxy" + proxy_id
-        os.popen("kubectl patch deployment" + proxy_name + " --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args', 'value': [" 
-        + ip_str + "]}] --context=" + cluster)
+        os.system("kubectl patch deployment " + proxy_name + " --namespace default --type='json' -p='[{'op': 'replace', 'path': '/spec/template/spec/containers/0/args', 'value': [" 
+        + newChain + "]}] --context=" + self.proxy_cluster[proxy_id])
 
     def _assign_proxy(self, ip, app_idx, proxy_idx, cluster):
         if proxy_idx == 0 and app_idx == 0:
-            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 1 and app_idx == 1:
-            self.ip_proxy[proxy_idx][app_idx-1] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx-1] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 2 and app_idx == 0:
-            self.ip_proxy[proxy_idx][app_idx+1] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx+1] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 2 and app_idx == 1:
-            self.ip_proxy[proxy_idx][app_idx-1] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx-1] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 3 and app_idx < 2:
-            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 4 and app_idx <= 2:
-            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 5 and app_idx == 0:
-            self.ip_proxy[proxy_idx][app_idx+1] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx+1] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 5 and app_idx == 1:
-            self.ip_proxy[proxy_idx][app_idx-1] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx-1] = ip
+            self._deploy_proxy(proxy_idx)
         elif proxy_idx == 5 and app_idx == 2:
-            self.ip_proxy[proxy_idx][app_idx] = random.choice(list(ip))
-            self._deploy_proxy(proxy_idx, cluster)
+            self.ip_proxy[proxy_idx][app_idx] = ip
+            self._deploy_proxy(proxy_idx)
         #unreasonable conditions
         else:
             return -1
@@ -421,41 +481,6 @@ class K8sEnvDQN(discrete.DiscreteEnv):
         #successful
         return 1
     
-    def _create_pod(number, appName, containerUrl, commands, cpuReq, cpuLimit, contextName):
-        config.load_kube_config(context=contextName)
-        v1 = client.AppsV1Api()
-        body = client.V1Deployment(
-            api_version='apps/v1',
-            kind='Deployment',
-            metadata=client.V1ObjectMeta(name=appName, labels={'app': appName}),
-            spec=client.V1DeploymentSpec(
-                replicas=number,
-                selector=client.V1LabelSelector(match_labels={'app': appName}),
-                strategy=client.V1DeploymentStrategy(),
-                template=client.V1PodTemplateSpec(
-                    metadata=client.V1ObjectMeta(labels={'app': appName}),
-                    spec=client.V1PodSpec(
-                        containers=[client.V1Container(
-                            image=containerUrl,
-                            name=appName,
-                            resources=client.V1ResourceRequirements(
-                                limits={'cpu': cpuLimit},
-                                requests={'cpu': cpuReq}
-                            )
-                        )],
-                        restart_policy='Always'
-                    )
-                )
-            ),
-            status= client.V1DeploymentStatus()
-        )
-        # Create new HPA with updated thresholds
-        try:
-            api_response = v1.replace_namespaced_deployment(name=appName, namespace='default', body=body, pretty=True)
-            print('Modified deployment for function ' + appName)
-        except Exception:
-            api_response = v1.create_namespaced_deployment(namespace='default', body=body, pretty=True)
-            print('Created deployment for function ' + appName)
 
     #function to get state
     def _get_state(self):
@@ -632,4 +657,39 @@ class K8sEnvDQN(discrete.DiscreteEnv):
 
         return state
 
-
+    #Not used
+    def _create_pod(number, appName, containerUrl, commands, cpuReq, cpuLimit, contextName):
+        config.load_kube_config(context=contextName)
+        v1 = client.AppsV1Api()
+        body = client.V1Deployment(
+            api_version='apps/v1',
+            kind='Deployment',
+            metadata=client.V1ObjectMeta(name=appName, labels={'app': appName}),
+            spec=client.V1DeploymentSpec(
+                replicas=number,
+                selector=client.V1LabelSelector(match_labels={'app': appName}),
+                strategy=client.V1DeploymentStrategy(),
+                template=client.V1PodTemplateSpec(
+                    metadata=client.V1ObjectMeta(labels={'app': appName}),
+                    spec=client.V1PodSpec(
+                        containers=[client.V1Container(
+                            image=containerUrl,
+                            name=appName,
+                            resources=client.V1ResourceRequirements(
+                                limits={'cpu': cpuLimit},
+                                requests={'cpu': cpuReq}
+                            )
+                        )],
+                        restart_policy='Always'
+                    )
+                )
+            ),
+            status= client.V1DeploymentStatus()
+        )
+        # Create new HPA with updated thresholds
+        try:
+            api_response = v1.replace_namespaced_deployment(name=appName, namespace='default', body=body, pretty=True)
+            print('Modified deployment for function ' + appName)
+        except Exception:
+            api_response = v1.create_namespaced_deployment(namespace='default', body=body, pretty=True)
+            print('Created deployment for function ' + appName)

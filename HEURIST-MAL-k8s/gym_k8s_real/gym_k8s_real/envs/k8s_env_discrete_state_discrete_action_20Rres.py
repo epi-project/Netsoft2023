@@ -81,25 +81,16 @@ class K8sEnvDiscreteStateDiscreteAction20Rres(discrete.DiscreteEnv):
             dt_dict : Dict
                 dictionary of formatted date and time.
         """
-        encoded_observation, now_observation = self._get_state()
-        if action == 0 and now_observation[1] <= 20:
-            return now_observation, 0, self.done, encoded_observation
-        if action == 2 and now_observation[1] > 80:
-            return now_observation, 0, self.done, encoded_observation
 #         if action == 1:
 #             reward = self._get_reward(now_observation)
 #             return now_observation, reward, self.done, encoded_observation
         
-        self._take_action(action)  # Create HPA
+        # self._take_action(action)  # Create HPA
         wait_time = self.timestep_duration * 60
         time.sleep(wait_time)  # Wait timestep_duration minutes for the changes to take place
 
-        encoded_observation, real_observation = self._get_state()
-        reward = self._get_reward(real_observation)
-
-        if -1 in self.decode(encoded_observation):
-            self.done = True
-            reward = 0
+        encoded_observation, real_observation = self._get_state_test()
+        reward = self._get_reward_test()
 
         now = datetime.datetime.now()
         dt_string = now.strftime('%d/%m/%Y %H:%M:%S')
@@ -109,6 +100,12 @@ class K8sEnvDiscreteStateDiscreteAction20Rres(discrete.DiscreteEnv):
 
         return real_observation, reward, self.done, encoded_observation
     
+    def _get_reward_test(self):
+        return random.uniform(0,25)
+
+    def _get_state_test(self):
+        return [random.choice([0,1,2,3,4,5,6]), random.choice([0,1,2,3,4,5,6]), random.choice([0,1,2,3,4,5]), random.choice([0,1,2,3,4,5,6])], [random.uniform(1,100), random.uniform(1,100),random.uniform(1,100),random.uniform(1,100)]
+
     def random_step(self, threshold):
         """
         Returns
@@ -160,8 +157,8 @@ class K8sEnvDiscreteStateDiscreteAction20Rres(discrete.DiscreteEnv):
         else:
             cpu_thresh = random.choice(possible_thresholds)
 
-        self._create_hpa(cpu_thresh)
-        return self._get_state()
+        # self._create_hpa(cpu_thresh)
+        return self._get_state_test()
 
     def render(self, mode='human'):
         return None
