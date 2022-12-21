@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: firewalls
+  name: firewalls
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: firewalls
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: firewalls
+    spec:
+      containers:
+        - image: jamilakassem/socks-chaining_firewall
+          name: firewalls
+          resources: 
+            limits:
+              cpu: 600m
+            requests:
+              cpu: 500m
+      restartPolicy: Always
+status: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: firewalls
+spec:
+  type: ClusterIP
+  selector:
+    app: firewalls
+  ports:
+    - port: 1080
+    #  targetPort: 1080
+    #  nodePort: 30021
+      protocol: TCP

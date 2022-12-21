@@ -20,7 +20,13 @@ register(
     entry_point='gym_k8s_real.envs:K8sEnvDiscreteStateDiscreteAction20Rres',
 )
 
+# environments for 6 proxy chainings
 register(
-    id='k8s-env-dqn-v0',
+    id='k8s-env-dqn-v1',
     entry_point='gym_k8s_real.envs:K8sEnvDQN',
+)
+
+register(
+    id='k8s-env-dqn-ml-v0',
+    entry_point='gym_k8s_real.envs:K8sEnvDQNML',
 )
