@@ -396,7 +396,7 @@ class K8sEnvDQNML(discrete.DiscreteEnv):
     def _get_state(self):
         #get cpu_states of all clusters
         cpu_states = []
-        real_cpu = [[0,0,0], [0,0,0]]
+        real_cpu = []
         for cluster_idx in range(self.num_cluster):
             cluster = self.cluster_names[cluster_idx]
             cpu = 0
@@ -405,11 +405,13 @@ class K8sEnvDQNML(discrete.DiscreteEnv):
                 app = self.app_names[app_idx]
                 aver_cpu = self._get_average_cpu(app, cluster)
                 cpu += aver_cpu
-                real_cpu[app_idx][cluster_idx] = aver_cpu
                 if cpu > 0:
                     count += 1
             cpu_states.append(self._get_discrete(cpu/count * 100 if count > 0 else 0))
         
+        for app in self.app_names:
+            real_cpu.append(self._get_cpu_per_pod(app))
+
         #get number_of_pods in all clusters
         pod_states = []
         real_pod = [[0,0,0], [0,0,0]]
@@ -545,6 +547,27 @@ class K8sEnvDQNML(discrete.DiscreteEnv):
         aver_cpu = cpuUsage / (numPods * cpuReqs) if numPods > 0 else 0.0
         # return numPods, cpuUsage / (numPods * cpuReqs)
         return aver_cpu
+
+    #get average_cpu per size of pod of each function
+    #return 0.xx
+    def _get_cpu_per_pod(self, app_name):
+        aver_cpu = 0
+        cpus = [0, 0, 0]
+        sizes = ['s', 'm', 'l']
+        for cluster in self.cluster_names:
+            #obtain from metric server and calculate
+            output = os.popen('kubectl top pod --context=' + cluster).read()
+            lines = output.split("\n")
+            cpuUsage = 1
+            for line in lines[1:-1]:
+                items = line.split()
+                idx = items[0].index('-')
+                for i in range(len(sizes)):
+                    if items[0][:idx] == app_name + sizes[i]:
+                        cpuUsage = int(items[1][:-1])
+                        cpus[i] += cpuUsage
+            # return numPods, cpuUsage / (numPods * cpuReqs)
+        return cpus
     
     #get number of active pods with app_name on cluster with cluster
     def _get_pods_num(self, app_name, cluster):
