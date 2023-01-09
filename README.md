@@ -1,4 +1,4 @@
-# EPI-kube-scaling
+# EPI-kube-configuration
 In this repository we add scaling techniques to the EPI framework setup to demonstrate scaling capabilities under stress test experiments.
 
 ## Deploying secvices; here we assume you have a kubernetes master and worker nodes running and configured
