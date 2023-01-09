@@ -21,22 +21,6 @@ In this repository we add scaling techniques to the EPI framework setup to demon
   $ locust -f ./locust.py --headless -u <number of clients> -r <spawn rate> -H <destination IP>
 ```
 
-## In HPA and VPA path there's example deployment of scalers per service.
-
-  
-## To collect matrices, you need to successfully deploy the metric server, after you can run the collecting script
-```shell
-  $ cd Scripts 
-  $ ./getResourcesCSV.sh --help 
-  $ ./getResourcesCSV.sh -n default --no-headers -o <filename>.csv
-```
-
-## Structure of three custom folders
-
-#### rl-autoscaler-k8s folder: 
-1. to interact with k8s cluster and train Q-learning agent;
-2. This folder should be run on the master node of k8s cluster;
-
 #### latency_collector folder:
 1. to collect latency;
 2. This folder can be run on any node to collect latency and expose to other nodes;
